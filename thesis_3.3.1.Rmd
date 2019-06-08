@@ -1,0 +1,200 @@
+---
+title: "thesis 3.3.1"
+author: "Yanlei"
+date: "2019年4月5日"
+output: html_document
+---
+下面是论文3.3.1节数值实验的代码
+
+核密度估计$\hat{f}(x)$  
+
+```{r}
+make_f_hat <- function(h, ker, sample_data) {
+  # Input:  `h`: bandwidth
+  #         `k`: kernel
+  #         `sample_data`: a vector contain sample data
+  # Output: a function, estimated pdf
+  n <- length(sample_data)
+  f_hat <- function(x) {
+    y <- (x - sample_data) / h
+    sum(ker(y)) /(n * h)
+  }
+  return(f_hat)
+}
+
+```
+
+下面是产生样本的函数
+
+```{r eval=FALSE, include=FALSE}
+generate_samples <- function(distribution, n, N, ...) {
+  # Return a n-by-N matrix which each col is sampled from given distribution
+  # Input:
+  #  distribution: a random generation function(e.g. rpios)
+  #             n: number of each sample
+  #             N: number of samples
+  #           ...: other params of distribution
+  sample_data <- matrix(nrow = n, ncol = N)
+  for (i in seq_along(1:N)) {
+    sample_data[, i] <- distribution(n, ...)
+  }
+  sample_data
+}
+```
+
+下面是计算核函数的L2 norm的函数
+```{r}
+#### \int x^2 K(x) dx
+
+A2_kM <-function(kernel)
+{
+if (kernel=="gaussian")          {xKr <- 1}
+else if (kernel=="silverman")    {xKr <- 0}
+else if (kernel=="epanechnikov") {xKr <- 1/5 }
+else if (kernel=="uniform")      {xKr <- 1/3 }
+else if (kernel=="triangular")   {xKr <- 1/6 }
+else if (kernel=="triweight")    {xKr <- 1/9}
+else if (kernel=="tricube")      {xKr <- 35/243}
+else if (kernel=="biweight")     {xKr <- 1/7}
+else if (kernel=="cosine")       {xKr <- (-8+pi^2)/pi^2}
+return(xKr)
+}
+
+#### \int K(x)^2 dx
+
+A3_kM <-function(kernel)
+{
+if (kernel=="gaussian")          {xKr <- 1/(2*sqrt(pi))}
+else if (kernel=="silverman")    {xKr <- (3/16)*sqrt(2)}
+else if (kernel=="epanechnikov") {xKr <- 3/5}
+else if (kernel=="uniform")      {xKr <- 1/2}
+else if (kernel=="triangular")   {xKr <- 2/3}
+else if (kernel=="triweight")    {xKr <- 350/429}
+else if (kernel=="tricube")      {xKr <- 175/247}
+else if (kernel=="biweight")     {xKr <- 5/7}
+else if (kernel=="cosine")       {xKr <- (1/16)*pi^2}
+return(xKr)
+}
+
+```
+
+下面是计算指数分布L2 norm的函数
+
+```{r}
+compute_L2 <- function(lambda) {
+  # Input: 
+  #       lambdas: parameters of exp distribution
+
+  0.5 * lambda^5
+}
+
+```
+
+下面是计算AMISE的函数
+```{r}
+compute_AMISE <- function(n, h, ker, lambda) {
+  # Input:
+  #       n: number of samples
+  #       h: bandwidth
+  #     ker: name of a kernel function, a string
+  #  lambda: param of the true exp distribution
+  L2_ker <- A3_kM(ker)
+  L2_f <- compute_L2(lambda)
+  mu_k <- A2_kM(ker)
+  L2_ker / (n * h) + 0.25 * h^4 * mu_k^2 * L2_f
+}
+```
+
+经验法则计算窗宽
+```{r}
+h_rot <- function(sample_data) {
+  n <- length(sample_data)
+  h_rot1 <- 4 / 3 * sd(sample_data) * n^(-0.2)
+  h_rot2 <- 4 / 3 * IQR(sample_data) / 1.34898 * n^(-0.2)
+  min(h_rot1, h_rot2)
+}
+
+```
+
+交叉验证法计算窗宽
+```{r}
+h_cv <- function(sample_data) {
+  h.ucv(sample_data)$h
+}
+```
+
+比较函数
+```{r}
+# same kernel different h selection methods
+compare_h_s <- function(n_s, lambda, N_sim, ker="gaussian") {
+  # Compare different h selection methods
+  # Args:
+  #    n_s: sample sizes
+  # lambda: para of exp distribution
+  #  N_sim: simulation number
+  #    ker: kernel name
+  set.seed(2333)
+  amise <- matrix(0, nrow = 3, ncol = length(n_s))
+  h_var_s <- amise
+  for (i in 1:length(n_s)) {
+    samples <- generate_samples(rexp, n_s[i], N_sim, lambda)
+    amise[3, i]<- compute_mean_amise(samples, h_cv, lambda, ker)
+    amise[2, i] <- compute_mean_amise(samples, dpik, lambda, ker)
+    amise[1, i] <- compute_mean_amise(samples, h_rot, lambda, ker)
+    h_var_s[3, i] <- compute_h_var(samples, h_cv)
+    h_var_s[2, i] <- compute_h_var(samples, dpik)
+    h_var_s[1, i] <- compute_h_var(samples, h_rot)
+  }
+  list(amise, h_var_s)
+}
+```
+
+计算AMISE的函数
+```{r}
+compute_mean_amise <- function(samples, h_func, lambda, ker = "gaussian"){
+  # Compute mean AMISE
+  # Args:
+  # samples: sample data
+  #  h_func: function that compute h
+  #  lambda: para of exp distribution
+  #     ker: kernel name
+  N_sim <- ncol(samples) 
+  n <- nrow(samples)
+  AMISEs <- numeric(N_sim)
+  for (t in seq_along(1:N_sim)) {
+    h <- h_func(samples[, t])
+    AMISEs[t] <- compute_AMISE(n, h, ker, lambda)
+  }
+  mean(AMISEs)
+}
+```
+
+计算方差的函数
+```{r}
+compute_h_var <- function(samples, h_func) {
+  # Compute h variance
+  # Args:
+  # samples: sample data
+  #  h_func: function that compute h
+  N_sim <- ncol(samples)
+  h_s <- numeric(N_sim)
+  for (t in seq_along(1:N_sim)) {
+    h_s[t] <- h_func(samples[, t])
+  }
+  var(h_s)
+}
+```
+
+得到表格1，2中的数据
+```{r}
+# table_1and2 is a list of two lists
+# table_1and2[[1]] is the data of table 1
+# table_1and2[[2]] is the data of table 2
+n_s <- c(50, 100, 200, 400, 800, 1000)
+table_1and2 <- compare_h_s(n_s, 1, 50)
+save(table_1and2, file = "table_1and2.Rdata")
+```
+
+
+
+

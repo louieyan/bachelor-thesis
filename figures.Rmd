@@ -1,0 +1,170 @@
+---
+title: "figures"
+author: "Yanlei"
+date: "2019年6月8日"
+output: html_document
+---
+
+Figure 1
+
+```{r echo=FALSE}
+# draw kernel functions
+library(ggplot2)
+
+# four kernel functions
+uniform <- function(u) {
+  0.5 * I(abs(u) <= 1)
+}
+
+triangle <- function(u) {
+  (1 - abs(u)) * I(abs(u) <= 1)
+}
+
+epanechnikov <- function(u) {
+  0.75 * (1 - u^2) * I(abs(u) <= 1)
+}
+
+gauss <- function(u) {
+  1 / sqrt(2*pi) * exp(-0.5*u^2)
+}
+# compute date
+x <- seq(-3, 3, 0.001)
+y1 <- uniform(x)
+y2 <- triangle(x)
+y3 <- epanechnikov(x)
+y4 <- gauss(x)
+len <- length(x)
+ker <- rep(c("Uniform", "Triangle", "Epanechnikov", "Gaussian"), c(len, len, len, len))
+x <- rep(x, 4)
+y <- c(y1, y2, y3, y4)
+df <- data.frame(x = x, y = y, ker = ker) # stack into a dataframe
+ggplot(data = df) +  # draw 
+  geom_line(aes(x = x, y = y)) +
+  facet_wrap(~ ker, ncol = 2)
+
+```
+
+Figure 2
+```{r echo=FALSE}
+empirical <- function(x, y) {
+  # `h` isn't important, it can be any positive value, so I omit it.
+  empirical_pmf <- y
+  empirical_pmf[y == x] <- 1
+  empirical_pmf[y != x] <- 0
+  empirical_pmf
+}
+
+bino <- function(x, h, y){
+  # Input:  `x` and `h` are parameters of binomial kernel
+  #         `y` a vector or scalar at where the kernel evluates
+  # Output:  same type and length as `y`, value of bino kernel
+  # Test: 
+  # y <- 1:6
+  # prob <- bino(3, 0.17, y)
+  # plot(x=seq_along(prob), y=prob) 
+  dbinom(y, x+1, (x+h)/(x+1))
+}
+
+dirac_du <- function(x, h, c, y){
+  # suppose y \in {0, 1, ..., c-1}
+  # so check it before use this function
+  # Test:
+  # y <- 1:6
+  # prob <- dirac_du(3, 0.17, 7, y)
+  # plot(x=seq_along(prob), y=prob)
+  (1 - h) * I(x == y) + h / (c - 1) * I(x != y)
+}
+
+dis_triang <- function(x, h, a, y) {
+  # suppose y \in {x-a, ..., x, ..., x+a}
+  # so check it before use this function
+  # Test:
+  # y <- 0:6
+  # prob <- dis_triang(3, 0.17, 3, y)
+  # plot(x=seq_along(prob), y=prob)
+  
+  # compute normlization const
+  k <- 0:a
+  p_a_h <- (2 * a + 1) * (a + 1)^h - 2 * sum(k^h)
+  
+  ((a + 1)^h - abs(y - x)^h) / p_a_h
+}
+y <- 0:8
+z1 <- bino(4, 0.1, y)
+z2 <- dirac_du(4, 0.1, 9, y)
+z3 <- dis_triang(4, 0.1, 5, y)
+z4 <- empirical(4, y)
+y <- rep(y, 4)
+z <- c(z1, z2, z3, z4)
+ker_name <- rep(c("Binomial", "DiracDU c=9", "Discrete Triang a=5", "Empirical Estimator"), c(length(z1), length(z2), length(z3), length(z4)))
+df <- data.frame(x = y, y = z, ker = ker_name)
+ggplot(data = df, aes(x = x, y = y)) +  # draw 
+  geom_point(size=2) +
+  geom_line(linetype="dotted") +
+  facet_wrap(~ ker, ncol = 2) 
+```
+
+
+Figure 3, 4, 5
+
+```{r echo=FALSE}
+
+
+# bayes: milliseconds
+#    cv: seconds
+n_s <- c(25, 50, 100, 200, 400, 800)
+time_bayes <- c(3.500707, 8.17624, 16.48031, 41.91465, 80.84039, 189.5512) / 1000
+time_cv <- c(1.359394, 5.206485, 17.48264, 55.36141, 206.3222, 742.7194)
+cv_over_bayes <- time_cv / time_bayes
+
+
+time_df1 <- data.frame(n = n_s, time = time_bayes, method = rep("Bayesian", 6))
+ggplot(data = time_df1, aes(x = n, y = time, colour = method)) +
+  geom_point(size=2) +
+  geom_line(linetype="dotted")
+
+time_df2 <- data.frame(n = n_s, time = time_cv, method = rep("CV", 6))
+#kable(data.frame(n_s, time_bayes, time_cv, cv_over_bayes), format = "latex")
+ggplot(data = time_df2, aes(x = n, y = time, colour = method)) +  # draw 
+  geom_point(size=2) +
+  geom_line(linetype="dotted")
+
+
+legend_name <- rep(c("Bayesian", "CV"), c(6, 6))
+time_df3 <- data.frame(n = n_s, time = c(time_bayes, time_cv), method = legend_name)
+ggplot(data = time_df3, aes(x = n, y = time, colour = method)) +  # draw 
+  geom_point(size=2) +
+  geom_line(linetype="dotted") 
+
+
+```
+
+
+Figure 6
+```{r echo=FALSE, warning=FALSE}
+library(ggplot2)
+df <- data.frame(claim, time = c(time_interval, NaN))
+ggplot(data = df, aes(x = claim)) +
+  geom_histogram(bins = 66)
+```
+
+Figure 7
+```{r echo=FALSE, warning=FALSE}
+ggplot(data = df, aes(x = time)) +
+  geom_histogram(bins = 66)
+```
+
+Figure 8
+```{r echo=FALSE}
+load("df_of_est_funcs.Rdata")
+ggplot(data = df_claim, aes(x=x, y=y)) + 
+  geom_line()
+
+```
+
+Figure 9
+```{r echo=FALSE}
+ggplot(data = df_interval, aes(x=x, y=y)) + 
+  geom_point()
+
+```

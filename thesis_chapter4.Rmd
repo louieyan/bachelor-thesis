@@ -1,0 +1,290 @@
+---
+title: "thesis_chapter4"
+author: "Yanlei"
+date: "2019年4月7日"
+output: html_document
+---
+
+导入数据：
+```{r}
+library(magrittr)
+library(KernSmooth)
+library(purrr)
+claim <- read.csv(file = "claim.csv")[, 2:8] %>%
+  as.matrix() %>%
+  t() %>%
+  as.vector()
+#claim <- rexp(819, 0.02)
+time_interval <- read.csv(file = "time_interval.csv") %>%
+  as.matrix() %>%
+  t() %>%
+  as.vector() %>%
+  extract(1:818)
+
+```
+
+计算核密度估计的函数
+首先把这个文档的最后一个代码块运行一下，再运行下面的代码
+```{r}
+h_claim <- h_rot(claim)
+
+#x <- c(min(time_interval):max(time_interval))
+#h_time_interval <- compute_bayes_h(x, time_interval)
+
+f_hat_claim <- make_f_hat(h_claim, gauss, claim)
+f_hat_time_in <- make_f_hat_discrete(bino, time_interval)
+
+# params of continous_rng
+a <- min(claim)
+b <- max(claim)
+k <- find_bound(f_hat_claim, a, b) * 6
+
+# params of disrete
+left <- range(time_interval)[1]
+right <- range(time_interval)[2]
+
+pmf_time_in <- numeric(length(time_interval))
+i <- 1
+for (x in c(left:right)) {
+  pmf_time_in[i] <- f_hat_time_in(x)
+  i <- i + 1
+}
+pmf_time_in <- pmf_time_in / sum(pmf_time_in)
+
+
+cdf_time_in <- make_cdf(pmf_time_in, c(left:right))
+
+```
+
+
+```{r}
+# rename
+
+claim_amount_pdf <- f_hat_claim
+# claim_amout_f <- continuous_rng
+# claim_interval_f <- discrete_rng
+claim_interval_cdf <- cdf_time_in
+
+```
+
+计算表格6
+
+```{r}
+# table 6
+set.seed(2333)
+t_s <- seq(50, 100, by = 10)
+#u_s <- c(50, 100, 200, 250)
+u_s <- c(50, 75, 100, 125)
+result <- matrix(0, nrow = length(u_s), ncol = length(t_s))
+
+for (i in c(1:length(u_s))) {
+  result[i, ] <- ruin_sim_simple(5000, 7.8, t_s, u_s[i], continuous_rng,
+                            claim_amount_pdf, a, b, k, discrete_rng, 
+                            claim_interval_cdf)
+}
+
+
+```
+
+
+计算表格7
+```{r}
+# table 7
+set.seed(2333)
+t_s <- seq(50, 100, by = 10)
+bound_s <- c(100, 150, 200)
+#u_s <- c(50, 100, 200, 250)
+u <- 75
+result <- matrix(0, nrow = length(bound_s), ncol = length(t_s))
+
+for (i in c(1:length(bound_s))) {
+  result[i, ] <- ruin_sim_with_barrier(5000, 7.8, t_s, u, continuous_rng,
+                            claim_amount_pdf, a, b, k, discrete_rng, 
+                            claim_interval_cdf, bound_s[i])
+}
+
+
+```
+
+
+大致画个图看一下连续情况的效果
+```{r}
+
+claim_rng <- numeric(length(claim))
+k <- find_bound(f_hat_claim, min(claim), max(claim))
+for (i in seq_along(1:length(claim))) {
+  claim_rng[i] <- continuous_rng(f_hat_claim, min(claim), max(claim), k * 5)
+}
+
+
+```
+
+```{r}
+df <- data.frame(x = claim, y = claim_rng)
+ggplot(data = df) + 
+  geom_histogram(aes(x = x), color = "black", fill = "white", alpha = 0.5) +
+  geom_histogram(aes(x = y), color = "red", fill = "blue")
+
+x = seq(a, b, length.out = 200)
+df2 <- data.frame(x, y = map_dbl(x, f_hat_claim))
+ggplot(data = df2, aes(x=x, y=y)) +
+  geom_line()
+
+```
+
+类似地，可以得到离散情况的
+
+```{r}
+f_d <- numeric(length(time_interval))
+i <- 1
+for (x in c(1:91)) {
+  f_d[i] <- f_hat_time_in(x)
+  i <- i + 1
+}
+f_d <- f_d / sum(f_d)
+
+F_x <- make_cdf(f_d, c(1:91))
+time_interval_rng <- numeric(length(time_interval))
+for (i in seq_along(1:length(time_interval))) {
+  time_interval_rng[i] <- discrete_rng(F_x)
+}
+```
+
+```{r}
+df <- data.frame(x = time_interval, y = time_interval_rng)
+ggplot(data = df) + 
+  geom_histogram(aes(x = x), color = "black", fill = "white", alpha = 0.5) +
+  geom_histogram(aes(x = y), color = "red", fill = "blue")
+
+
+```
+
+
+
+```{r}
+make_f_hat <- function(h, ker, sample_data) {
+  # Input:  `h`: bandwidth
+  #         `k`: kernel
+  #         `sample_data`: a vector contain sample data
+  # Output: a function, estimated pdf
+  n <- length(sample_data)
+  f_hat <- function(x) {
+    y <- (x - sample_data) / h
+    sum(ker(y)) /(n * h)
+  }
+  return(f_hat)
+}
+
+make_f_hat_discrete <- function(ker, sample_data) {
+  # Apply bayesian bandwidths in associated discrete estimation
+  # Input: 
+  #      `     h`: bandwiths, same length as vector 0:max(sample_data)
+  #         `ker`: kernel function, actually is bino kernel
+  # `sample_data`: the data sample from which the estimate is to be computed
+  # Output:
+  #       a estimated pmf
+  
+  n <- length(sample_data)
+  f_hat_discrete <- function(x) {
+    h_x <- compute_bayes_h(x, sample_data)
+    sum(ker(x, h_x, sample_data)) / n
+  }
+  f_hat_discrete
+}
+
+compute_bayes_h <- function(x, sample_data, alp = 0.5, bet = 15) {
+  # Return a number h_x which is computd by bayesian method using bino ker
+  # Input: 
+  #           x: the point where it's corresponding h need to be computed
+  # sample_data: data sample
+  #    alp, bet: piror distribution beta's alpha params
+  n <- length(sample_data)
+  numer <- numeric(n)
+  denom <- numeric(n)
+  i <- 1
+  for (i in 1:n) {
+    X_i <- sample_data[i]
+    if (X_i <= x+1) {
+      k <- 0:X_i
+      numer[i] = sum((x^k * beta(X_i+alp-k+1, x+bet+1-X_i)) / (factorial(x+1-X_i) * factorial(k) * factorial(X_i-k)))
+      denom[i] = sum((x^k * beta(X_i+alp-k, x+bet+1-X_i)) / (factorial(x+1-X_i) * factorial(k) * factorial(X_i-k)))
+    } else {
+      numer[i] <- 0
+      denom[i] <- 0
+    }
+    i <- i + 1
+  }
+  sum(numer) / sum(denom)
+}
+
+
+find_bound <- function(f, a, b) {
+  # Input:  `f`: a function of single variable
+  #         `a`, `b`: domain of `f`
+  # Output: upper bound of f
+  optimise(f, c(a, b), maximum = TRUE)$objective
+}
+
+continuous_rng <- function(fy, a, b, k) {
+  # Input:  `fy`: a distribution function
+  #         `a`, `b`: support interval of fy
+  #         `k`: upper bound of fy
+  # Output: a random number generated from fy
+  while(TRUE) {
+    y <- runif(1, a, b)
+    z <- runif(1, 0, k)
+    if (z < fy(y)) {
+      return(y)
+    }
+  }
+}
+
+make_cdf <- function(pmf, support) {
+  # compute cdf using the support vector `x` and corresponding pmf `px`
+  #       pmf: a pmf vector
+  #   support: support of px
+  # pmf and support should have the same length
+  # Fx <- 0
+  cdf <- function(x) {
+    mask <- support <= x
+    Fx <- sum(pmf[mask])
+    return(Fx)
+  }
+  return(cdf)
+}
+
+discrete_rng <- function(Fx) {
+  # generate a rv ~ F
+  # Fx: a cdf
+  U <- runif(1)
+  X <- 0
+  while (Fx(X) < U) {
+    X = X + 1
+  }
+  return(X)
+}
+
+h_rot <- function(sample_data) {
+  n <- length(sample_data)
+  h_rot1 <- 4 / 3 * sd(sample_data) * n^(-0.2)
+  h_rot2 <- 4 / 3 * IQR(sample_data) / 1.34898 * n^(-0.2)
+  min(h_rot1, h_rot2)
+}
+
+gauss <- function(u) {
+  1 / sqrt(2*pi) * exp(-0.5*u^2)
+}
+
+bino <- function(x, h, y){
+  # Input:  `x` and `h` are parameters of binomial kernel
+  #         `y` a vector or scalar at where the kernel evluates
+  # Output:  same type and length as `y`, value of bino kernel
+  # Test: 
+  # y <- 1:6
+  # prob <- bino(3, 0.17, y)
+  # plot(x=seq_along(prob), y=prob) 
+  dbinom(y, x+1, (x+h)/(x+1))
+}
+
+
+```
